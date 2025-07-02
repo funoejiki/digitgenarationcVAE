@@ -5,6 +5,35 @@ import torch.nn.functional as F
 import matplotlib.pyplot as plt
 import numpy as np
 
+# --- カスタムCSSでFrutiger Aero風に ---
+def frutiger_aero_style():
+    st.markdown("""
+        <style>
+            html, body, [class*="css"] {
+                font-family: 'Segoe UI', sans-serif;
+                background: linear-gradient(to bottom right, #d2f0f7, #f2fcff);
+                color: #003344;
+            }
+            .stButton>button {
+                background-color: #a3e3ff;
+                color: #003344;
+                border: none;
+                border-radius: 12px;
+                padding: 0.5em 1.2em;
+                box-shadow: 0 4px 10px rgba(0, 150, 200, 0.2);
+                font-weight: bold;
+            }
+            .stButton>button:hover {
+                background-color: #c6f1ff;
+                color: #002233;
+            }
+            .stSelectbox label, .stSlider label {
+                font-weight: bold;
+                font-size: 1.1em;
+            }
+        </style>
+    """, unsafe_allow_html=True)
+
 # --- モデル定義 ---
 class Encoder(nn.Module):
     def __init__(self, latent_dim=3, num_classes=10):
@@ -55,32 +84,29 @@ class CVAE(nn.Module):
         z = self.reparameterize(mu, logvar)
         return self.decoder(z, label), mu, logvar
 
-# --- Streamlit UI ---
-st.title("CVAE Digit Generator")
-st.markdown("Conditional Variational AutoEncoder による数字画像生成")
+# --- UI ---
+frutiger_aero_style()
 
-# ユーザー入力
-digit = st.selectbox("生成したい数字を選んでください (0〜9)", list(range(10)))
-num_images = st.slider("生成する画像枚数", 1, 20, 6)
+st.title("🧊 CVAE Digit Generator")
+st.markdown("Frutiger Aero 風インターフェースで数字画像を生成します")
 
-# モデルとデバイスの設定
+digit = st.selectbox("🪧 生成したい数字を選んでください (0〜9)", list(range(10)))
+num_images = st.slider("🖼️ 生成する画像の枚数", 1, 20, 6)
+
+# モデルロード
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 latent_dim = 3
 model = CVAE(latent_dim=latent_dim).to(device)
-
-# モデルのロード
-model_path = "cvae.pth"
-model.load_state_dict(torch.load(model_path, map_location=device))
+model.load_state_dict(torch.load("cvae.pth", map_location=device))
 model.eval()
 
-# 画像生成
-if st.button("画像を生成"):
+# 生成
+if st.button("✨ 画像を生成"):
     z = torch.randn(num_images, latent_dim).to(device)
     labels = torch.full((num_images,), digit, dtype=torch.long, device=device)
     with torch.no_grad():
         generated = model.decoder(z, labels)
 
-    # 表示
     nrow = int(np.ceil(np.sqrt(num_images)))
     ncol = int(np.ceil(num_images / nrow))
     fig, axes = plt.subplots(nrow, ncol, figsize=(ncol * 2, nrow * 2))
