@@ -1,121 +1,62 @@
 import streamlit as st
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
-import matplotlib.pyplot as plt
-import numpy as np
+import torchvision.transforms as transforms
+from PIL import Image
+import io
 
-# --- カスタムCSSでFrutiger Aero風に ---
-def frutiger_aero_style():
-    st.markdown("""
-        <style>
-            html, body, [class*="css"] {
-                font-family: 'Segoe UI', sans-serif;
-                background: linear-gradient(to bottom right, #d2f0f7, #f2fcff);
-                color: #003344;
-            }
-            .stButton>button {
-                background-color: #a3e3ff;
-                color: #003344;
-                border: none;
-                border-radius: 12px;
-                padding: 0.5em 1.2em;
-                box-shadow: 0 4px 10px rgba(0, 150, 200, 0.2);
-                font-weight: bold;
-            }
-            .stButton>button:hover {
-                background-color: #c6f1ff;
-                color: #002233;
-            }
-            .stSelectbox label, .stSlider label {
-                font-weight: bold;
-                font-size: 1.1em;
-            }
-        </style>
-    """, unsafe_allow_html=True)
+# ----- モデル定義 -----
+class SimpleCNN(nn.Module):
+    def __init__(self):
+        super(SimpleCNN, self).__init__()
+        self.conv = nn.Sequential(
+            nn.Conv2d(1, 16, 3, 1),
+            nn.ReLU(),
+            nn.MaxPool2d(2)
+        )
+        self.fc = nn.Sequential(
+            nn.Linear(16 * 13 * 13, 128),
+            nn.ReLU(),
+            nn.Linear(128, 10)  # MNISTなどの10クラス分類を想定
+        )
 
-# --- モデル定義 ---
-class Encoder(nn.Module):
-    def __init__(self, latent_dim=3, num_classes=10):
-        super().__init__()
-        self.label_embedding = nn.Linear(num_classes, 16)
-        self.fc_hidden = nn.Linear(28 * 28 + 16, 128)
-        self.fc_mu = nn.Linear(128, latent_dim)
-        self.fc_logvar = nn.Linear(128, latent_dim)
+    def forward(self, x):
+        x = self.conv(x)
+        x = x.view(x.size(0), -1)
+        return self.fc(x)
 
-    def forward(self, image, label):
-        flattened_image = image.view(image.size(0), -1)
-        label_one_hot = F.one_hot(label, num_classes=10).float()
-        label_embedding = F.relu(self.label_embedding(label_one_hot))
-        concatenated_input = torch.cat([flattened_image, label_embedding], dim=1)
-        hidden = F.relu(self.fc_hidden(concatenated_input))
-        mu = self.fc_mu(hidden)
-        logvar = self.fc_logvar(hidden)
-        return mu, logvar
-
-class Decoder(nn.Module):
-    def __init__(self, latent_dim=3, num_classes=10):
-        super().__init__()
-        self.label_embedding = nn.Linear(num_classes, 16)
-        self.fc_hidden = nn.Linear(latent_dim + 16, 128)
-        self.fc_out = nn.Linear(128, 28 * 28)
-
-    def forward(self, latent_vector, label):
-        label_one_hot = F.one_hot(label, num_classes=10).float()
-        label_embedding = F.relu(self.label_embedding(label_one_hot))
-        concatenated_latent = torch.cat([latent_vector, label_embedding], dim=1)
-        hidden = F.relu(self.fc_hidden(concatenated_latent))
-        output = torch.sigmoid(self.fc_out(hidden))
-        return output.view(-1, 1, 28, 28)
-
-class CVAE(nn.Module):
-    def __init__(self, latent_dim=3, num_classes=10):
-        super().__init__()
-        self.encoder = Encoder(latent_dim, num_classes)
-        self.decoder = Decoder(latent_dim, num_classes)
-
-    def reparameterize(self, mu, logvar):
-        std = torch.exp(0.5 * logvar)
-        epsilon = torch.randn_like(std)
-        return mu + epsilon * std
-
-    def forward(self, image, label):
-        mu, logvar = self.encoder(image, label)
-        z = self.reparameterize(mu, logvar)
-        return self.decoder(z, label), mu, logvar
-
-# --- UI ---
-frutiger_aero_style()
-
-st.title("🧊 CVAE Digit Generator")
-st.markdown("Frutiger Aero 風インターフェースで数字画像を生成します")
-
-digit = st.selectbox("🪧 生成したい数字を選んでください (0〜9)", list(range(10)))
-num_images = st.slider("🖼️ 生成する画像の枚数", 1, 20, 6)
-
-# モデルロード
+# ----- デバイス設定 -----
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-latent_dim = 3
-model = CVAE(latent_dim=latent_dim).to(device)
-model.load_state_dict(torch.load("cvae.pth", map_location=device))
+
+# ----- モデルロード -----
+model = SimpleCNN().to(device)
+
+# 例: モデル全体（構造 + 重み）を保存した .pth の場合（weights_only=False）
+model.load_state_dict(torch.load("model.pth", map_location=device))  # weights_only=False
 model.eval()
 
-# 生成
-if st.button("✨ 画像を生成"):
-    z = torch.randn(num_images, latent_dim).to(device)
-    labels = torch.full((num_images,), digit, dtype=torch.long, device=device)
+# ----- 入力変換 -----
+transform = transforms.Compose([
+    transforms.Grayscale(num_output_channels=1),
+    transforms.Resize((28, 28)),
+    transforms.ToTensor(),
+    transforms.Normalize((0.5,), (0.5,))
+])
+
+# ----- Streamlit アプリ -----
+st.title("手書き数字分類器")
+
+uploaded_file = st.file_uploader("画像をアップロードしてください（28x28の手書き数字画像）", type=["png", "jpg", "jpeg"])
+
+if uploaded_file is not None:
+    image = Image.open(uploaded_file)
+    st.image(image, caption="アップロードされた画像", use_column_width=True)
+
+    # 前処理
+    input_tensor = transform(image).unsqueeze(0).to(device)
+
     with torch.no_grad():
-        generated = model.decoder(z, labels)
+        output = model(input_tensor)
+        predicted_class = torch.argmax(output, dim=1).item()
 
-    nrow = int(np.ceil(np.sqrt(num_images)))
-    ncol = int(np.ceil(num_images / nrow))
-    fig, axes = plt.subplots(nrow, ncol, figsize=(ncol * 2, nrow * 2))
-    axes = np.array(axes).reshape(nrow, ncol)
-
-    for i in range(nrow * ncol):
-        ax = axes[i // ncol, i % ncol]
-        if i < num_images:
-            ax.imshow(generated[i].squeeze().cpu().numpy(), cmap="gray")
-        ax.axis("off")
-
-    st.pyplot(fig)
+    st.write(f"予測された数字: **{predicted_class}**")
