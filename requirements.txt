@@ -1,4 +1,4 @@
-torch
-numpy
-matplotlib
 streamlit
+torch
+torchvision
+Pillow
